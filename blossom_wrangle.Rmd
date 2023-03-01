@@ -1,0 +1,298 @@
+---
+title: "Cherry Blossom Prediction 2023"
+author: "REDACTED and REDACTED"
+date: "2023-02-28"
+output: html_document
+---
+## Narrative
+
+  When we heard about the cherry blossom prediction competition, our thoughts lept to prediction markets and “wisdom-of-the-crowds” methods. According to the work of Philip Tetlock and his collaborators, trained human forecasters combined in a weighted average with mass crowd predictions consistently outperform even the best machine learning and statistical models in similar forecasting efforts.
+  
+  The core of the idea is quite simple. Each person in the crowd has some amount of true and useful information about the desired prediction, and some amount of incorrect information (bias and random error). By aggregating the predictions of each person, randomness and random bias cancel each other out, and the true and useful begins to dominate the prediction. Trained, practiced forecasters contribute a larger amount of true information on average, so in a weighted average against an untrained crowd they receive a higher weighting. Tetlock’s organization, the Good Judgment Project, has empirically discovered these weightings over years of study.
+  
+  Time, resource, and rule constraints precluded our ability to garner a prediction in such a way. However, we drew inspiration from the core of the idea to create our own “wisdom of the crowds” method. We decided to collect as many previously-submitted cherry blossom bloom prediction models as possible, update them with the latest data, and re-run them to obtain new predictions. We would run the models on past data to obtain their past predictions, then use these past predictions to create a weighted average of the models. Finally, we would use the weightings and the future predictions of the models to generate our own future predictions.
+  
+  The core of the idea remains the same as the wisdom-of-the-crowds model: each model is based on similar (but usually not identical) data. Each model uses different methods to achieve its predictions. We therefore assume that each model contains some true and useful information, some bias, and some random error. By creating a weighted average of their predictions, we hope to reduce some bias inherent in the models without an increase in variance, thus improving the bias-variance tradeoff.
+  
+  Finding the models proved to be a challenge. We were not able to look at submitted competition models directly. Instead, we searched through forked github repositories from the main GMU-CherryBlossomCompetition branch. Parsing through nearly a hundred of these, we found those which warranted further investigation. We then explored these models one-by-one to determine which might be viable candidates for our final model.
+  
+  Candidates were evaluated for their working code, substantive modeling efforts, variety in data sources, and types of models. Due to the enormous time required to parse and update each model, and the limited variability in available models, we chose five models for our final submission:
+  
+* stevenlio88
+* siyueyang (previous award winner)
+* mattharding23 (previous award winner)
+* kenkoonwong (previous award winner)
+* Daria-Kearny
+
+	Our weighted average outperformed its constituent models in terms of mean squared error for every city (except Vancouver, where there are no actuals to compare against). 
+	In the future, we feel that a similar effort with more models and possibly with more sophisticated methods for determining model weights should outperform any individual model. Potential methods include recurrent neural networks, LSTM, or various methods of time series regression.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+```
+
+```{r data_pull, include = FALSE}
+# load in known actuals for each city
+kyoto <- read_csv("~/Projects/Cherry Blossoms/OG Data/peak-bloom-prediction/data/kyoto.csv")
+
+liestal <- read_csv("~/Projects/Cherry Blossoms/OG Data/peak-bloom-prediction/data/liestal.csv")
+
+washingtondc <- read_csv("~/Projects/Cherry Blossoms/OG Data/peak-bloom-prediction/data/washingtondc.csv")
+
+vancouver <- read_csv("~/Projects/Cherry Blossoms/OG Data/peak-bloom-prediction/data/vancouver.csv")
+
+# load in predictions from each of our five models
+blooms_sl <- read_excel("~/Projects/Cherry Blossoms/consolidated_blooms.xlsx", 
+    sheet = "stevenlio88")
+
+blooms_kkw <- read_excel("~/Projects/Cherry Blossoms/consolidated_blooms.xlsx", 
+    sheet = "kenkoonwong")
+
+blooms_dk <- read_excel("~/Projects/Cherry Blossoms/consolidated_blooms.xlsx", 
+    sheet = "Daria-Kearney")
+
+blooms_mh <- read_excel("~/Projects/Cherry Blossoms/consolidated_blooms.xlsx", 
+    sheet = "mattharding")
+
+blooms_syy <- read_excel("~/Projects/Cherry Blossoms/consolidated_blooms.xlsx", 
+    sheet = "siyueyang")
+```
+
+```{r wrangle, include = FALSE}
+# Get the actuals into a state we like, starting with making sure that these columns will be clear in the final merged data frame
+kyoto$kyoto_day <- kyoto$bloom_doy
+liestal$liestal_day <- liestal$bloom_doy
+washingtondc$dc_day <- washingtondc$bloom_doy
+vancouver$vancouver_day <- vancouver$bloom_doy
+
+kyoto.join <- kyoto %>% select(year, kyoto_day)
+liestal.join <- liestal %>% select(year, liestal_day)
+dc.join <- washingtondc %>% select(year, dc_day)
+vancouver.join <- vancouver %>% select(year, vancouver_day)
+
+bloom_date <- full_join(kyoto.join, liestal.join, by = "year") %>% full_join(dc.join, by = "year") %>% full_join(vancouver.join, by = "year")
+
+# Daria-Kearney's model didn't give round numbers, need to fix that
+blooms_dk <- blooms_dk %>% mutate("year" = Year,
+                                  "kyoto_dk" = round(kyoto),
+                                  "liestal_dk" = round(liestal),
+                                  "dc_dk" = round(dc),
+                                  "vancouver_dk" = round(vancouver)
+)
+
+blooms_kkw <- blooms_kkw %>% mutate("year" = Year,
+                                  "kyoto_kkw" = round(kyoto),
+                                  "liestal_kkw" = round(liestal),
+                                  "dc_kkw" = round(dc),
+                                  "vancouver_kkw" = round(vancouver)
+)
+
+blooms_mh <- blooms_mh %>% mutate("kyoto_mh" = as.numeric(kyoto),
+                                  "liestal_mh" = as.numeric(liestal),
+                                  "dc_mh" = round(washingtondc),
+                                  "vancouver_mh" = round(vancouver)
+)
+
+blooms_sl <- blooms_sl %>% mutate("year" = Year,
+                                  "kyoto_sl" = as.numeric(kyoto),
+                                  "liestal_sl" = as.numeric(liestal),
+                                  "dc_sl" = round(dc),
+                                  "vancouver_sl" = as.numeric(vancouver)
+)
+
+blooms_syy <- blooms_syy %>% mutate("kyoto_syy" = round(kyoto),
+                                  "liestal_syy" = round(liestal),
+                                  "dc_syy" = round(washingtondc),
+                                  "vancouver_syy" = round(vancouver)
+)
+
+
+```
+
+```{r visualize_actuals, include = FALSE}
+# Let's look at the actual bloom dates in one place
+plot.actuals <- bloom_date %>% 
+  dplyr::filter(year > 1900) %>%
+  ggplot(aes(x = year)) +
+  geom_point(aes(y = kyoto_day), colour = "red") +
+  geom_point(aes(y = liestal_day), colour = "blue") +
+  geom_point(aes(y = dc_day), colour = "green") +
+  geom_point(aes(y = vancouver_day), colour = "violet")
+plot.actuals
+```
+
+```{r merge_model_predictions, include = FALSE}
+# Most of our models cut off at 2000, so we will start there for best data completeness. 
+models_and_actuals <- dplyr::filter(bloom_date, year >= 2000) %>% 
+  full_join(dplyr::filter(blooms_dk, year >= 2000), by = "year") %>%
+  full_join(dplyr::filter(blooms_kkw, year >= 2000), by = "year") %>%
+  full_join(dplyr::filter(blooms_mh, year >= 2000), by = "year") %>%
+  full_join(dplyr::filter(blooms_sl, year >= 2000), by = "year") %>%
+  full_join(dplyr::filter(blooms_syy, year >= 2000), by = "year")
+
+models_and_actuals.pre23 <- dplyr::filter(models_and_actuals, year < 2023)
+```
+
+## Basic Visualizations
+
+our first explorations gave us hope. DC's actual numbers are close to the predictions made for past years by the models. The same is true for both Liestal and Kyoto. Vancouver's actual bloom dates weren't part of the main data set and uncovering them would have been a misappropriation of team resources.
+
+```{r models_and_actuals_visualized, echo=FALSE, warning=FALSE}
+plot.dc.pre <- models_and_actuals %>% dplyr::filter(year < 2023) %>% 
+  ggplot(aes(x = year)) +
+  geom_point(aes(y = dc_day), colour = "black") +
+  geom_line(aes(y = dc_day), colour = "black") +
+  geom_point(aes(y = dc_dk), colour = "blue") +
+  geom_point(aes(y = dc_kkw), colour = "green") +
+  geom_point(aes(y = dc_mh), colour = "violet") +
+  geom_point(aes(y = dc_sl), colour = "orange") +
+  geom_point(aes(y = dc_syy), colour = "red") +
+  labs(title = "Predictions and Actuals for DC") +
+  ylab("Day of Year") +
+  xlab("Year")
+plot.dc.pre
+
+plot.liestal.pre <- models_and_actuals %>% dplyr::filter(year < 2023) %>% 
+  ggplot(aes(x = year)) +
+  geom_point(aes(y = liestal_day), colour = "black") +
+  geom_line(aes(y = liestal_day), colour = "black") +
+  geom_point(aes(y = liestal_dk), colour = "blue") +
+  geom_point(aes(y = liestal_kkw), colour = "green") +
+  geom_point(aes(y = liestal_mh), colour = "violet") +
+  geom_point(aes(y = liestal_sl), colour = "orange") +
+  geom_point(aes(y = liestal_syy), colour = "red") +
+  labs(title = "Predictions and Actuals for Liestal") +
+  ylab("Day of Year") +
+  xlab("Year")
+plot.liestal.pre
+
+plot.kyoto.pre <- models_and_actuals %>% dplyr::filter(year < 2023) %>% 
+  ggplot(aes(x = year)) +
+  geom_point(aes(y = kyoto_day), colour = "black") +
+  geom_line(aes(y = kyoto_day), colour = "black") +
+  geom_point(aes(y = kyoto_dk), colour = "blue") +
+  geom_point(aes(y = kyoto_kkw), colour = "green") +
+  geom_point(aes(y = kyoto_mh), colour = "violet") +
+  geom_point(aes(y = kyoto_sl), colour = "orange") +
+  geom_point(aes(y = kyoto_syy), colour = "red") +
+  labs(title = "Predictions and Actuals for Kyoto") +
+  ylab("Day of Year") +
+  xlab("Year")
+plot.kyoto.pre
+
+plot.vancouver.pre <- models_and_actuals %>% dplyr::filter(year < 2023 & year > 2006) %>% 
+  ggplot(aes(x = year)) +
+  geom_point(aes(y = vancouver_dk), colour = "blue") +
+  geom_point(aes(y = vancouver_kkw), colour = "green") +
+  geom_point(aes(y = vancouver_sl), colour = "orange") +
+  labs(title = "Predictions for Vancouver") +
+  ylab("Day of Year") +
+  xlab("Year")
+plot.vancouver.pre
+```
+
+## Linear Modeling
+Since we were looking only for a weighted average of the models, we forced the intercept to 0. This also reduced the danger of overfitting. Between this and the low amount of data available acrosss all 5 models, we chose not to split into training and test sets.
+
+```{r basic_linear_regression, echo=FALSE}
+# DC's weighted average
+line.dc <- lm(data = dplyr::filter(models_and_actuals, year < 2023), dc_day ~ 0 + dc_dk + dc_kkw + dc_mh + dc_sl + dc_syy)
+line.dc.summ <- summary(line.dc)
+line.dc.summ
+# Get MSE's
+line.dc.mse <- mean(line.dc.summ$residuals^2)
+dk.dc.mse <- mean((models_and_actuals.pre23$dc_day - models_and_actuals.pre23$dc_dk)^2)
+kkw.dc.mse <- mean((models_and_actuals.pre23$dc_day - models_and_actuals.pre23$dc_kkw)^2)
+mh.dc.mse <- mean((models_and_actuals.pre23$dc_day - models_and_actuals.pre23$dc_mh)^2)
+sl.dc.mse <- mean((models_and_actuals.pre23$dc_day - models_and_actuals.pre23$dc_sl)^2)
+syy.dc.mse <- mean((models_and_actuals.pre23$dc_day - models_and_actuals.pre23$dc_syy)^2)
+# MSE DF
+dc.mse <- c(line.dc.mse, dk.dc.mse, kkw.dc.mse, mh.dc.mse, sl.dc.mse, syy.dc.mse)
+mse_names <- c("DC Regression MSE", "DC DK MSE", "DC KKW MSE", "DC MH MSE", "DC SL MSE", "DC SYY MSE")
+dc_mse <- data.frame(mse_names, dc.mse)
+dc_mse
+
+# Liestal's weighted average
+line.liestal <- lm(data = dplyr::filter(models_and_actuals, year < 2023), liestal_day ~ 0 + liestal_dk + liestal_kkw + liestal_mh + liestal_sl + liestal_syy)
+line.liestal.summ <- summary(line.liestal)
+line.liestal.summ
+line.liestal.mse <- mean(line.liestal.summ$residuals^2)
+# Get MSE's
+dk.liestal.mse <- mean((models_and_actuals.pre23$liestal_day - models_and_actuals.pre23$liestal_dk)^2)
+kkw.liestal.mse <- mean((models_and_actuals.pre23$liestal_day - models_and_actuals.pre23$liestal_kkw)^2)
+mh.liestal.mse <- mean((models_and_actuals.pre23$liestal_day - models_and_actuals.pre23$liestal_mh)^2)
+sl.liestal.mse <- mean((models_and_actuals.pre23$liestal_day - models_and_actuals.pre23$liestal_sl)^2)
+syy.liestal.mse <- mean((models_and_actuals.pre23$liestal_day - models_and_actuals.pre23$liestal_syy)^2)
+# MSE DF
+liestal.mse <- c(line.liestal.mse, dk.liestal.mse, kkw.liestal.mse, mh.liestal.mse, sl.liestal.mse, syy.liestal.mse)
+mse_names <- c("liestal Regression MSE", "liestal DK MSE", "liestal KKW MSE", "liestal MH MSE", "liestal SL MSE", "liestal SYY MSE")
+liestal_mse <- data.frame(mse_names, liestal.mse)
+liestal_mse
+
+# Kyoto's weighted average
+line.kyoto <- lm(data = dplyr::filter(models_and_actuals, year < 2023), kyoto_day ~ 0 + kyoto_dk + kyoto_kkw + kyoto_mh + kyoto_sl + kyoto_syy)
+line.kyoto.summ <- summary(line.kyoto)
+line.kyoto.mse <- mean(line.kyoto.summ$residuals^2)
+line.kyoto.summ
+# Get MSE's
+dk.kyoto.mse <- mean((models_and_actuals.pre23$kyoto_day - models_and_actuals.pre23$kyoto_dk)^2)
+kkw.kyoto.mse <- mean((models_and_actuals.pre23$kyoto_day - models_and_actuals.pre23$kyoto_kkw)^2)
+mh.kyoto.mse <- mean((models_and_actuals.pre23$kyoto_day - models_and_actuals.pre23$kyoto_mh)^2)
+sl.kyoto.mse <- mean((models_and_actuals.pre23$kyoto_day - models_and_actuals.pre23$kyoto_sl)^2)
+syy.kyoto.mse <- mean((models_and_actuals.pre23$kyoto_day - models_and_actuals.pre23$kyoto_syy)^2)
+# MSE DF
+kyoto.mse <- c(line.kyoto.mse, dk.kyoto.mse, kkw.kyoto.mse, mh.kyoto.mse, sl.kyoto.mse, syy.kyoto.mse)
+mse_names <- c("kyoto Regression MSE", "kyoto DK MSE", "kyoto KKW MSE", "kyoto MH MSE", "kyoto SL MSE", "kyoto SYY MSE")
+kyoto_mse <- data.frame(mse_names, kyoto.mse)
+kyoto_mse
+
+```
+
+The regression has the lowest MSE among all of the models, consistently. There is nothing unexpected about this, nor is this a particular sign of model effectiveness; regression models are built to find reduced MSE among a set of points.
+
+```{r predict, echo=FALSE}
+# predictions using linear models
+dc_test <- models_and_actuals %>%
+  dplyr::filter(year > 2022) %>%
+  select(dc_dk, dc_kkw, dc_mh, dc_sl, dc_syy)
+
+dc_predictions <- line.dc %>%
+  predict(newdata = dc_test) %>%
+  as.vector()
+
+liestal_test <- models_and_actuals %>%
+  dplyr::filter(year > 2022) %>%
+  select(liestal_dk, liestal_kkw, liestal_mh, liestal_sl, liestal_syy)
+
+liestal_predictions <- line.liestal %>%
+  predict(newdata = liestal_test) %>%
+  as.vector()
+
+kyoto_test <- models_and_actuals %>%
+  dplyr::filter(year > 2022) %>%
+  select(kyoto_dk, kyoto_kkw, kyoto_mh, kyoto_sl, kyoto_syy)
+
+kyoto_predictions <- line.kyoto %>%
+  predict(newdata = kyoto_test) %>%
+  as.vector()
+
+vancouver_predictions <- models_and_actuals %>% 
+  dplyr::filter(year > 2022) %>%
+  mutate("vancouver_predictions" = (vancouver_dk + vancouver_kkw + vancouver_mh + vancouver_sl + vancouver_syy)/5) %>%
+  select(vancouver_predictions) %>%
+  as.vector()
+
+cherry_predictions <- data.frame(c("2023", "2024", "2025", "2026", "2027", "2028", "2029", "2030", "2031", "2032"), dc_predictions, liestal_predictions, kyoto_predictions, vancouver_predictions)
+colnames(cherry_predictions) <- c("year", "washingtondc", "liestal", "kyoto", "vancouver")
+
+cherry_predictions
+
+write.csv(cherry_predictions, "cherry-predictions.csv")
+```
+Finally, we can see our predictions for 2023 and forward. As actual values for Vancouver are not generally available, values for the prediction were found by taking an unweighted average among the models.
